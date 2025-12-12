@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useDropzone } from 'react-dropzone';
 import './App.css';
 
-const API_BASE_URL = 'http://10.69.5.161:5000/api';
+const API_BASE_URL = 'https://vibeshare-nmmi.onrender.com';
 
 function App() {
   const [user, setUser] = useState(null);
