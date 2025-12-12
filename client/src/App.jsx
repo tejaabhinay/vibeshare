@@ -3,7 +3,8 @@ import axios from 'axios';
 import { useDropzone } from 'react-dropzone';
 import './App.css';
 
-const API_BASE_URL = 'https://vibeshare-nmmi.onrender.com';
+// ✅ FIX: Added '/api' to the end so it matches your backend routes
+const API_BASE_URL = 'https://vibeshare-nmmi.onrender.com/api';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -18,7 +19,6 @@ function App() {
   useEffect(() => {
     if (user) {
       fetchPhotos();
-      // Poll for new photos every 3 seconds
       const interval = setInterval(fetchPhotos, 3000);
       return () => clearInterval(interval);
     }
@@ -26,6 +26,7 @@ function App() {
 
   const fetchPhotos = async () => {
     try {
+      // This now correctly calls: .../api/photos/roomName
       const response = await axios.get(`${API_BASE_URL}/photos/${user.roomName}`);
       setPhotos(response.data);
     } catch (err) {
@@ -34,7 +35,7 @@ function App() {
   };
 
   const handleLoginSubmit = (e) => {
-    e.preventDefault();
+    e.preventDefault(); // Prevents page reload
     setError('');
 
     if (!username.trim() || !roomName.trim()) {
@@ -64,13 +65,13 @@ function App() {
     try {
       for (const file of acceptedFiles) {
         const formData = new FormData();
-        // Field name must match server: upload.any() accepts any field name
         formData.append('vibePhoto', file);
         formData.append('roomName', user.roomName);
         formData.append('username', user.username);
 
         console.log('📤 Uploading file:', { name: file.name, size: file.size });
 
+        // This now correctly calls: .../api/upload
         const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
           headers: {
             'Content-Type': 'multipart/form-data',
@@ -104,14 +105,12 @@ function App() {
     setSuccess('');
   };
 
-  // View 1: Login Screen
   if (!user) {
     return (
       <div className="login-container">
         <div className="login-card">
           <h1 className="app-title">🎨 VibeShare</h1>
           <p className="app-subtitle">Share your vibes with friends</p>
-
           <form onSubmit={handleLoginSubmit} className="login-form">
             <div className="form-group">
               <label htmlFor="username">Username</label>
@@ -124,7 +123,6 @@ function App() {
                 className="form-input"
               />
             </div>
-
             <div className="form-group">
               <label htmlFor="roomName">Room Name</label>
               <input
@@ -136,9 +134,7 @@ function App() {
                 className="form-input"
               />
             </div>
-
             {error && <div className="error-message">{error}</div>}
-
             <button type="submit" className="login-button">
               Enter Room
             </button>
@@ -148,7 +144,6 @@ function App() {
     );
   }
 
-  // View 2: Gallery Screen
   return (
     <div className="gallery-container">
       <header className="gallery-header">
@@ -162,9 +157,7 @@ function App() {
           Leave Room
         </button>
       </header>
-
       <div className="gallery-content">
-        {/* Upload Zone */}
         <div
           {...getRootProps()}
           className={`dropzone ${isDragActive ? 'active' : ''} ${uploading ? 'uploading' : ''}`}
@@ -188,12 +181,8 @@ function App() {
             </div>
           )}
         </div>
-
-        {/* Messages */}
         {error && <div className="error-message">{error}</div>}
         {success && <div className="success-message">{success}</div>}
-
-        {/* Photos Grid */}
         <div className="photos-grid">
           {photos.length > 0 ? (
             photos.map((photo) => (
@@ -201,14 +190,6 @@ function App() {
                 <img src={photo.imageUrl} alt={photo.username} className="photo-image" />
                 <div className="photo-info">
                   <p className="photo-username">by {photo.username}</p>
-                  <p className="photo-date">
-                    {new Date(photo.createdAt).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </p>
                 </div>
               </div>
             ))
