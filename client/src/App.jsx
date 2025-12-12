@@ -7,8 +7,12 @@ import './App.css';
 const API_BASE_URL = 'https://vibeshare-nmmi.onrender.com/api';
 
 // Lightbox Modal Component
-function LightboxModal({ isOpen, photo, onClose, onPrevious, onNext }) {
+function LightboxModal({ isOpen, photo, onClose, onPrevious, onNext, onDownload, isDownloading }) {
   if (!isOpen || !photo) return null;
+
+  const handleDownloadClick = async () => {
+    await onDownload(photo.imageUrl, photo.username);
+  };
 
   return (
     <div className="lightbox-overlay" onClick={onClose}>
@@ -28,8 +32,12 @@ function LightboxModal({ isOpen, photo, onClose, onPrevious, onNext }) {
                 minute: '2-digit',
               })}
             </p>
-            <button className="lightbox-download" onClick={() => downloadImage(photo.imageUrl, photo.username)}>
-              ⬇️ Download
+            <button 
+              className="lightbox-download" 
+              onClick={handleDownloadClick}
+              disabled={isDownloading}
+            >
+              {isDownloading ? '⏳ Downloading...' : '⬇️ Download'}
             </button>
           </div>
         </div>
@@ -40,36 +48,74 @@ function LightboxModal({ isOpen, photo, onClose, onPrevious, onNext }) {
   );
 }
 
-// Download Handler
-const downloadImage = (imageUrl, username) => {
-  const link = document.createElement('a');
-  link.href = imageUrl;
-  link.download = `${username}-photo-${Date.now()}.jpg`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-};
-
 function App() {
   const [user, setUser] = useState(null);
   const [username, setUsername] = useState('');
   const [roomName, setRoomName] = useState('');
   const [photos, setPhotos] = useState([]);
+  const [activeUsers, setActiveUsers] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Fetch photos when user joins a room
   useEffect(() => {
     if (user) {
+      // Join the room
+      joinRoom();
+      
+      // Fetch photos and users
       fetchPhotos();
-      const interval = setInterval(fetchPhotos, 3000);
-      return () => clearInterval(interval);
+      fetchActiveUsers();
+      
+      // Setup intervals for polling
+      const photosInterval = setInterval(fetchPhotos, 3000);
+      const usersInterval = setInterval(fetchActiveUsers, 2000);
+      const heartbeatInterval = setInterval(() => sendHeartbeat(user.roomName, user.username), 10000);
+      
+      return () => {
+        clearInterval(photosInterval);
+        clearInterval(usersInterval);
+        clearInterval(heartbeatInterval);
+      };
     }
   }, [user]);
+
+  const joinRoom = async () => {
+    try {
+      await axios.post(`${API_BASE_URL}/users/join`, {
+        roomName: user.roomName,
+        username: user.username,
+      });
+      console.log('✅ Joined room:', user.roomName);
+    } catch (err) {
+      console.error('Failed to join room:', err);
+    }
+  };
+
+  const sendHeartbeat = async (roomName, username) => {
+    try {
+      await axios.post(`${API_BASE_URL}/users/heartbeat`, {
+        roomName,
+        username,
+      });
+    } catch (err) {
+      console.error('Heartbeat failed:', err);
+    }
+  };
+
+  const fetchActiveUsers = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/users/${user.roomName}`);
+      setActiveUsers(response.data.users || []);
+    } catch (err) {
+      console.error('Failed to fetch active users:', err);
+    }
+  };
 
   const fetchPhotos = async () => {
     try {
@@ -78,6 +124,52 @@ function App() {
       setPhotos(response.data);
     } catch (err) {
       console.error('Failed to fetch photos:', err);
+    }
+  };
+
+  // Download Handler - Handles cross-origin URLs properly
+  const handleDownloadImage = async (imageUrl, username) => {
+    setIsDownloading(true);
+    try {
+      console.log('📥 Starting download from:', imageUrl);
+      
+      // Fetch the image as a blob to handle CORS properly
+      const response = await fetch(imageUrl, {
+        mode: 'cors',
+        credentials: 'omit',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      console.log('✅ Image blob received, size:', blob.size);
+      
+      // Create a blob URL and download
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${username}-photo-${Date.now()}.jpg`;
+      
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Clean up the blob URL after download
+      setTimeout(() => {
+        window.URL.revokeObjectURL(blobUrl);
+      }, 100);
+      
+      console.log('✅ Download completed successfully');
+      setSuccess('✅ Image downloaded successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (error) {
+      console.error('❌ Download failed:', error);
+      setError(`Failed to download: ${error.message}`);
+      setTimeout(() => setError(''), 5000);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -145,9 +237,22 @@ function App() {
     },
   });
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (user) {
+      try {
+        await axios.delete(`${API_BASE_URL}/users/leave`, {
+          data: {
+            roomName: user.roomName,
+            username: user.username,
+          },
+        });
+      } catch (err) {
+        console.error('Error leaving room:', err);
+      }
+    }
     setUser(null);
     setPhotos([]);
+    setActiveUsers([]);
     setError('');
     setSuccess('');
     setLightboxOpen(false);
@@ -232,6 +337,27 @@ function App() {
             Room: <strong>{user.roomName}</strong> | User: <strong>{user.username}</strong>
           </p>
         </div>
+
+        {/* Active Users Panel */}
+        <div className="active-users-panel">
+          <div className="users-header">
+            <span className="users-title">👥 Online ({activeUsers.length})</span>
+          </div>
+          <div className="users-list">
+            {activeUsers.length > 0 ? (
+              activeUsers.map((u) => (
+                <div key={u.username} className="user-item">
+                  <span className="user-status-dot"></span>
+                  <span className="user-name">{u.username}</span>
+                  {u.username === user.username && <span className="user-badge">You</span>}
+                </div>
+              ))
+            ) : (
+              <p className="no-users">No one online</p>
+            )}
+          </div>
+        </div>
+
         <button onClick={handleLogout} className="logout-button">
           Leave Room
         </button>
@@ -270,6 +396,8 @@ function App() {
           onClose={() => setLightboxOpen(false)}
           onPrevious={handlePreviousPhoto}
           onNext={handleNextPhoto}
+          onDownload={handleDownloadImage}
+          isDownloading={isDownloading}
         />
 
         {/* Grouped Photos by Owner with Carousel */}

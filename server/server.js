@@ -16,11 +16,37 @@ const app = express();
 // ===========================================
 app.use(cors({
   origin: '*', // Allow your frontend to talk to this server
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 app.use(express.json());
+
+// ===========================================
+// 👥 IN-MEMORY USER PRESENCE TRACKING
+// ===========================================
+// Structure: { roomName: { username: { joinedAt, lastSeen } } }
+const activeUsers = {};
+
+// Cleanup inactive users every 30 seconds
+setInterval(() => {
+  const now = Date.now();
+  const TIMEOUT = 45000; // 45 seconds
+
+  for (const roomName in activeUsers) {
+    for (const username in activeUsers[roomName]) {
+      const user = activeUsers[roomName][username];
+      if (now - user.lastSeen > TIMEOUT) {
+        delete activeUsers[roomName][username];
+        console.log(`🔴 Removed inactive user: ${username} from ${roomName}`);
+      }
+    }
+    // Remove empty rooms
+    if (Object.keys(activeUsers[roomName]).length === 0) {
+      delete activeUsers[roomName];
+    }
+  }
+}, 30000);
 
 // MongoDB Connection
 mongoose
@@ -104,6 +130,120 @@ app.get('/api/photos/:roomName', async (req, res) => {
   } catch (error) {
     console.error('❌ Error fetching photos:', error);
     res.status(500).json({ error: 'Failed to fetch photos' });
+  }
+});
+
+// ================= USER PRESENCE ROUTES =================
+
+// Join Room - Add user to active users
+app.post('/api/users/join', (req, res) => {
+  try {
+    const { roomName, username } = req.body;
+
+    if (!roomName || !username) {
+      return res.status(400).json({ error: 'roomName and username required' });
+    }
+
+    // Initialize room if it doesn't exist
+    if (!activeUsers[roomName]) {
+      activeUsers[roomName] = {};
+    }
+
+    // Add or update user
+    activeUsers[roomName][username] = {
+      joinedAt: Date.now(),
+      lastSeen: Date.now(),
+    };
+
+    console.log(`🟢 ${username} joined room: ${roomName}`);
+    console.log(`📊 Active users in ${roomName}:`, Object.keys(activeUsers[roomName]));
+
+    res.status(200).json({ 
+      message: 'Joined room', 
+      activeUsers: activeUsers[roomName] 
+    });
+  } catch (error) {
+    console.error('❌ Error joining room:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Heartbeat - Keep user alive and update lastSeen
+app.post('/api/users/heartbeat', (req, res) => {
+  try {
+    const { roomName, username } = req.body;
+
+    if (!roomName || !username) {
+      return res.status(400).json({ error: 'roomName and username required' });
+    }
+
+    // Initialize room if it doesn't exist
+    if (!activeUsers[roomName]) {
+      activeUsers[roomName] = {};
+    }
+
+    // Update or add user
+    activeUsers[roomName][username] = {
+      joinedAt: activeUsers[roomName][username]?.joinedAt || Date.now(),
+      lastSeen: Date.now(),
+    };
+
+    res.status(200).json({ 
+      activeUsers: activeUsers[roomName] 
+    });
+  } catch (error) {
+    console.error('❌ Error in heartbeat:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get Active Users in Room
+app.get('/api/users/:roomName', (req, res) => {
+  try {
+    const { roomName } = req.params;
+
+    const users = activeUsers[roomName] 
+      ? Object.keys(activeUsers[roomName]).map((username) => ({
+          username,
+          joinedAt: activeUsers[roomName][username].joinedAt,
+          lastSeen: activeUsers[roomName][username].lastSeen,
+        }))
+      : [];
+
+    res.status(200).json({ 
+      roomName,
+      activeUserCount: users.length,
+      users 
+    });
+  } catch (error) {
+    console.error('❌ Error fetching users:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Leave Room - Remove user from active users
+app.delete('/api/users/leave', (req, res) => {
+  try {
+    const { roomName, username } = req.body;
+
+    if (!roomName || !username) {
+      return res.status(400).json({ error: 'roomName and username required' });
+    }
+
+    if (activeUsers[roomName] && activeUsers[roomName][username]) {
+      delete activeUsers[roomName][username];
+      console.log(`🔴 ${username} left room: ${roomName}`);
+    }
+
+    // Clean up empty rooms
+    if (activeUsers[roomName] && Object.keys(activeUsers[roomName]).length === 0) {
+      delete activeUsers[roomName];
+    }
+
+    res.status(200).json({ message: 'Left room' });
+  } catch (error) {
+    console.error('❌ Error leaving room:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
