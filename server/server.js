@@ -5,7 +5,8 @@ import multer from 'multer';
 import dotenv from 'dotenv';
 import cloudinary from 'cloudinary';
 import stream from 'stream'; // Native Node module
-import Photo from './models/Photo.js'; 
+import Photo from './models/Photo.js';
+import Chat from './models/Chat.js'; 
 
 dotenv.config();
 
@@ -244,6 +245,82 @@ app.delete('/api/users/leave', (req, res) => {
   } catch (error) {
     console.error('❌ Error leaving room:', error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ================= CHAT ROUTES =================
+
+// Send Chat Message
+app.post('/api/chat/send', async (req, res) => {
+  try {
+    const { roomName, username, message } = req.body;
+
+    if (!roomName || !username || !message) {
+      return res.status(400).json({ error: 'roomName, username, and message are required' });
+    }
+
+    const newChat = new Chat({
+      roomName,
+      username,
+      message: message.trim(),
+    });
+
+    await newChat.save();
+
+    console.log(`💬 Message from ${username} in ${roomName}: ${message.substring(0, 50)}...`);
+    res.status(201).json(newChat);
+  } catch (error) {
+    console.error('❌ Error sending message:', error);
+    res.status(500).json({ error: 'Failed to send message', details: error.message });
+  }
+});
+
+// Get Chat Messages for Room (with pagination)
+app.get('/api/chat/:roomName', async (req, res) => {
+  try {
+    const { roomName } = req.params;
+    const { limit = 50, skip = 0 } = req.query;
+
+    const messages = await Chat.find({ roomName })
+      .sort({ createdAt: 1 })
+      .skip(parseInt(skip))
+      .limit(parseInt(limit));
+
+    const totalMessages = await Chat.countDocuments({ roomName });
+
+    res.status(200).json({
+      roomName,
+      totalMessages,
+      messages,
+    });
+  } catch (error) {
+    console.error('❌ Error fetching messages:', error);
+    res.status(500).json({ error: 'Failed to fetch messages', details: error.message });
+  }
+});
+
+// Delete Chat Message (only by sender)
+app.delete('/api/chat/:messageId', async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { username } = req.body;
+
+    const chat = await Chat.findById(messageId);
+
+    if (!chat) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    if (chat.username !== username) {
+      return res.status(403).json({ error: 'You can only delete your own messages' });
+    }
+
+    await Chat.findByIdAndDelete(messageId);
+    console.log(`🗑️ Message deleted by ${username}`);
+    res.status(200).json({ message: 'Message deleted' });
+  } catch (error) {
+    console.error('❌ Error deleting message:', error);
+    res.status(500).json({ error: 'Failed to delete message', details: error.message });
   }
 });
 

@@ -61,6 +61,10 @@ function App() {
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [messages, setMessages] = useState([]);
+  const [messageInput, setMessageInput] = useState('');
+  const [isChatOpen, setIsChatOpen] = useState(true);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
 
   // Fetch photos when user joins a room
   useEffect(() => {
@@ -68,18 +72,21 @@ function App() {
       // Join the room
       joinRoom();
       
-      // Fetch photos and users
+      // Fetch photos, users, and messages
       fetchPhotos();
       fetchActiveUsers();
+      fetchMessages();
       
       // Setup intervals for polling
       const photosInterval = setInterval(fetchPhotos, 3000);
       const usersInterval = setInterval(fetchActiveUsers, 2000);
+      const messagesInterval = setInterval(fetchMessages, 2000);
       const heartbeatInterval = setInterval(() => sendHeartbeat(user.roomName, user.username), 10000);
       
       return () => {
         clearInterval(photosInterval);
         clearInterval(usersInterval);
+        clearInterval(messagesInterval);
         clearInterval(heartbeatInterval);
       };
     }
@@ -124,6 +131,60 @@ function App() {
       setPhotos(response.data);
     } catch (err) {
       console.error('Failed to fetch photos:', err);
+    }
+  };
+
+  const fetchMessages = async () => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/chat/${user.roomName}`);
+      setMessages(response.data.messages);
+    } catch (err) {
+      console.error('Failed to fetch messages:', err);
+    }
+  };
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    
+    if (!messageInput.trim()) {
+      return;
+    }
+
+    setIsSendingMessage(true);
+    try {
+      await axios.post(`${API_BASE_URL}/chat/send`, {
+        roomName: user.roomName,
+        username: user.username,
+        message: messageInput,
+      });
+
+      setMessageInput('');
+      await fetchMessages();
+      
+      // Scroll to bottom
+      setTimeout(() => {
+        const messagesContainer = document.querySelector('.chat-messages');
+        if (messagesContainer) {
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+      }, 100);
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      setError('Failed to send message');
+    } finally {
+      setIsSendingMessage(false);
+    }
+  };
+
+  const handleDeleteMessage = async (messageId) => {
+    try {
+      await axios.delete(`${API_BASE_URL}/chat/${messageId}`, {
+        data: { username: user.username },
+      });
+      await fetchMessages();
+    } catch (err) {
+      console.error('Failed to delete message:', err);
+      setError('Failed to delete message');
     }
   };
 
@@ -361,8 +422,20 @@ function App() {
         <button onClick={handleLogout} className="logout-button">
           Leave Room
         </button>
+
+        {/* Chat Toggle Button */}
+        <button 
+          onClick={() => setIsChatOpen(!isChatOpen)} 
+          className="chat-toggle-button"
+          title={isChatOpen ? "Close chat" : "Open chat"}
+        >
+          💬 {isChatOpen ? 'Hide' : 'Show'} Chat
+        </button>
       </header>
-      <div className="gallery-content">
+
+      {/* Main Layout Container */}
+      <div className="main-layout">
+        <div className="gallery-content">
         <div
           {...getRootProps()}
           className={`dropzone ${isDragActive ? 'active' : ''} ${uploading ? 'uploading' : ''}`}
@@ -436,6 +509,75 @@ function App() {
           <div className="empty-gallery">
             <p className="empty-icon">🖼️</p>
             <p className="empty-text">No photos yet. Be the first to share!</p>
+          </div>
+        )}
+        </div>
+
+        {/* Chat Sidebar */}
+        {isChatOpen && (
+          <div className="chat-sidebar">
+            <div className="chat-header">
+              <h3>💬 Room Chat</h3>
+              <button 
+                onClick={() => setIsChatOpen(false)}
+                className="chat-close-btn"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="chat-messages">
+              {messages.length > 0 ? (
+                messages.map((msg) => (
+                  <div 
+                    key={msg._id} 
+                    className={`chat-message ${msg.username === user.username ? 'own' : 'other'}`}
+                  >
+                    <div className="message-header">
+                      <span className="message-author">{msg.username}</span>
+                      <span className="message-time">
+                        {new Date(msg.createdAt).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </div>
+                    <div className="message-content">{msg.message}</div>
+                    {msg.username === user.username && (
+                      <button
+                        onClick={() => handleDeleteMessage(msg._id)}
+                        className="message-delete-btn"
+                        title="Delete message"
+                      >
+                        🗑️
+                      </button>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="no-messages">
+                  <p>No messages yet. Start the conversation! 👋</p>
+                </div>
+              )}
+            </div>
+
+            <form onSubmit={handleSendMessage} className="chat-input-form">
+              <input
+                type="text"
+                value={messageInput}
+                onChange={(e) => setMessageInput(e.target.value)}
+                placeholder="Type a message..."
+                className="chat-input"
+                disabled={isSendingMessage}
+              />
+              <button 
+                type="submit" 
+                className="chat-send-button"
+                disabled={isSendingMessage || !messageInput.trim()}
+              >
+                {isSendingMessage ? '⏳' : '📤'}
+              </button>
+            </form>
           </div>
         )}
       </div>
