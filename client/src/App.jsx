@@ -6,6 +6,50 @@ import './App.css';
 // ✅ FIX: Added '/api' to the end so it matches your backend routes
 const API_BASE_URL = 'https://vibeshare-nmmi.onrender.com/api';
 
+// Lightbox Modal Component
+function LightboxModal({ isOpen, photo, onClose, onPrevious, onNext }) {
+  if (!isOpen || !photo) return null;
+
+  return (
+    <div className="lightbox-overlay" onClick={onClose}>
+      <div className="lightbox-container" onClick={(e) => e.stopPropagation()}>
+        <button className="lightbox-close" onClick={onClose}>✕</button>
+        <button className="lightbox-prev" onClick={onPrevious}>‹</button>
+        
+        <div className="lightbox-content">
+          <img src={photo.imageUrl} alt={photo.username} className="lightbox-image" />
+          <div className="lightbox-info">
+            <p className="lightbox-username">📸 by {photo.username}</p>
+            <p className="lightbox-date">
+              {new Date(photo.createdAt).toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </p>
+            <button className="lightbox-download" onClick={() => downloadImage(photo.imageUrl, photo.username)}>
+              ⬇️ Download
+            </button>
+          </div>
+        </div>
+
+        <button className="lightbox-next" onClick={onNext}>›</button>
+      </div>
+    </div>
+  );
+}
+
+// Download Handler
+const downloadImage = (imageUrl, username) => {
+  const link = document.createElement('a');
+  link.href = imageUrl;
+  link.download = `${username}-photo-${Date.now()}.jpg`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
 function App() {
   const [user, setUser] = useState(null);
   const [username, setUsername] = useState('');
@@ -14,6 +58,9 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState(null);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
 
   // Fetch photos when user joins a room
   useEffect(() => {
@@ -103,7 +150,39 @@ function App() {
     setPhotos([]);
     setError('');
     setSuccess('');
+    setLightboxOpen(false);
+    setSelectedPhoto(null);
   };
+
+  // Open lightbox with photo
+  const openLightbox = (photo, index) => {
+    setSelectedPhoto(photo);
+    setSelectedPhotoIndex(index);
+    setLightboxOpen(true);
+  };
+
+  // Navigate to previous photo
+  const handlePreviousPhoto = () => {
+    const newIndex = (selectedPhotoIndex - 1 + photos.length) % photos.length;
+    setSelectedPhoto(photos[newIndex]);
+    setSelectedPhotoIndex(newIndex);
+  };
+
+  // Navigate to next photo
+  const handleNextPhoto = () => {
+    const newIndex = (selectedPhotoIndex + 1) % photos.length;
+    setSelectedPhoto(photos[newIndex]);
+    setSelectedPhotoIndex(newIndex);
+  };
+
+  // Group photos by username (owner)
+  const groupedPhotos = photos.reduce((acc, photo) => {
+    if (!acc[photo.username]) {
+      acc[photo.username] = [];
+    }
+    acc[photo.username].push(photo);
+    return acc;
+  }, {});
 
   if (!user) {
     return (
@@ -183,23 +262,54 @@ function App() {
         </div>
         {error && <div className="error-message">{error}</div>}
         {success && <div className="success-message">{success}</div>}
-        <div className="photos-grid">
-          {photos.length > 0 ? (
-            photos.map((photo) => (
-              <div key={photo._id} className="photo-card">
-                <img src={photo.imageUrl} alt={photo.username} className="photo-image" />
-                <div className="photo-info">
-                  <p className="photo-username">by {photo.username}</p>
+
+        {/* Lightbox Modal */}
+        <LightboxModal
+          isOpen={lightboxOpen}
+          photo={selectedPhoto}
+          onClose={() => setLightboxOpen(false)}
+          onPrevious={handlePreviousPhoto}
+          onNext={handleNextPhoto}
+        />
+
+        {/* Grouped Photos by Owner with Carousel */}
+        {photos.length > 0 ? (
+          <div className="owner-groups">
+            {Object.entries(groupedPhotos).map(([ownerName, ownerPhotos]) => (
+              <div key={ownerName} className="owner-group">
+                <h2 className="owner-title">📸 {ownerName}'s Photos</h2>
+                <div className="carousel-container">
+                  <div className="carousel">
+                    {ownerPhotos.map((photo, index) => {
+                      const globalIndex = photos.findIndex((p) => p._id === photo._id);
+                      return (
+                        <div
+                          key={photo._id}
+                          className="carousel-item"
+                          onClick={() => openLightbox(photo, globalIndex)}
+                        >
+                          <img
+                            src={photo.imageUrl}
+                            alt={ownerName}
+                            className="carousel-image"
+                          />
+                          <div className="carousel-overlay">
+                            <span className="expand-icon">🔍</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="empty-gallery">
-              <p className="empty-icon">🖼️</p>
-              <p className="empty-text">No photos yet. Be the first to share!</p>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="empty-gallery">
+            <p className="empty-icon">🖼️</p>
+            <p className="empty-text">No photos yet. Be the first to share!</p>
+          </div>
+        )}
       </div>
     </div>
   );
